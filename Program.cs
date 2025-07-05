@@ -11,7 +11,7 @@ using OpenTelemetry.Trace;
 internal class Program
 {
     const string ModelId = "gpt-4o-mini";
-    
+
     private static async Task Main(string[] args)
     {
         // プログラム内で使用するモデルIDを定数として定義します。
@@ -33,14 +33,7 @@ internal class Program
 
         string homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        StdioClientTransport clientTransport = new(new StdioClientTransportOptions
-        {
-            Name = "filesystem",
-            Command = "npx",
-            Arguments = ["-y", "@modelcontextprotocol/server-filesystem", homeDirectory]
-        });
-        IMcpClient mcpClient = await McpClientFactory.CreateAsync(clientTransport);
-        IList<McpClientTool> tools = await mcpClient.ListToolsAsync();
+        IList<McpClientTool> tools = await InitializeToolsAsync(homeDirectory);
 
         IChatClient openaiClient = new ChatClient(ModelId, Environment.GetEnvironmentVariable("OPENAI_API_KEY")).AsIChatClient();
         IDistributedCache cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
@@ -86,5 +79,34 @@ internal class Program
             });
             Console.WriteLine(historyJson);
         }
+    }
+
+    static async Task<IList<McpClientTool>> InitializeToolsAsync(string homeDir)
+    {
+        StdioClientTransport filesystemTransport = new(new StdioClientTransportOptions
+        {
+            Name = "filesystem",
+            Command = "npx",
+            Arguments = ["-y", "@modelcontextprotocol/server-filesystem", homeDir]
+        });
+
+        StdioClientTransport commandExecutorTransport = new(new StdioClientTransportOptions
+        {
+            Name = "command-executor",
+            Command = "npx",
+            Arguments = ["-y", "github:Sunwood-ai-labs/command-executor-mcp-server"],
+            EnvironmentVariables = new Dictionary<string, string?>
+            {
+                { "ALLOWED_COMMANDS", "git,pwsh,python,npx,npm,pip,systeminfo" }
+            }
+        });
+
+        IMcpClient filesystemClient = await McpClientFactory.CreateAsync(filesystemTransport);
+        IMcpClient commandExecutorClient = await McpClientFactory.CreateAsync(commandExecutorTransport);
+
+        IList<McpClientTool> filesystemTools = await filesystemClient.ListToolsAsync();
+        IList<McpClientTool> commandExecutorTools = await commandExecutorClient.ListToolsAsync();
+
+        return [.. filesystemTools, .. commandExecutorTools];
     }
 }
